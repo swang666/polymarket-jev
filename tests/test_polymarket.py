@@ -1,0 +1,160 @@
+"""Tests for parsing Gamma's payloads and filtering them down to tradeable rows.
+
+Gamma hands back several fields as JSON *strings* and mixes types between rows,
+so the parsing here is checked against the real shapes recorded in the fixtures.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from pmjev.config import DiscoveryConfig
+from pmjev.models import Market
+from pmjev.polymarket import filter_markets, refresh_prices
+
+FIXTURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "pmjev", "fixtures")
+NOW = datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
+
+
+def recorded_rows():
+    with open(os.path.join(FIXTURES, "markets.json"), encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def test_parses_the_recorded_gamma_rows():
+    markets = [Market.from_gamma(row) for row in recorded_rows()]
+    assert len(markets) == 4
+    for market in markets:
+        assert market.id
+        assert market.outcomes == ["Yes", "No"]
+        assert len(market.clob_token_ids) == 2
+        assert market.description
+        assert market.end_date is not None
+        assert market.end_date.tzinfo is not None
+
+
+def test_json_string_fields_are_decoded():
+    market = Market.from_gamma({
+        "id": 42,
+        "slug": "x",
+        "outcomes": '["Yes", "No"]',
+        "outcomePrices": '["0.25", "0.75"]',
+        "clobTokenIds": '["111", "222"]',
+    })
+    assert market.id == "42"                    # coerced to str
+    assert market.outcomes == ["Yes", "No"]
+    assert market.outcome_prices == [0.25, 0.75]
+    assert market.clob_token_ids == ["111", "222"]
+
+
+def test_malformed_json_fields_do_not_raise():
+    market = Market.from_gamma({"id": "1", "outcomes": "not json",
+                                "outcomePrices": None, "clobTokenIds": "["})
+    assert market.outcomes == []
+    assert market.outcome_prices == []
+    assert market.clob_token_ids == []
+
+
+def test_yes_price_prefers_the_book_midpoint():
+    market = Market.from_gamma({
+        "id": "1", "bestBid": 0.40, "bestAsk": 0.44,
+        "outcomePrices": '["0.10", "0.90"]',
+    })
+    assert market.yes_price == pytest.approx(0.42)
+
+
+def test_yes_price_falls_back_to_the_listed_price():
+    market = Market.from_gamma({"id": "1", "outcomePrices": '["0.10", "0.90"]'})
+    assert market.yes_price == pytest.approx(0.10)
+
+
+def test_trailing_z_timestamps_parse_as_utc():
+    market = Market.from_gamma({"id": "1", "endDate": "2027-01-01T04:59:00Z"})
+    assert market.end_date == datetime(2027, 1, 1, 4, 59, tzinfo=timezone.utc)
+
+
+def test_days_to_resolution_is_measured_in_code_not_by_the_model():
+    market = Market.from_gamma({"id": "1", "endDate": "2026-09-29T12:00:00Z"})
+    assert market.days_to_resolution(NOW) == pytest.approx(10.0)
+
+
+# --- filtering ------------------------------------------------------------
+
+def base_row(**overrides):
+    row = {
+        "id": "1", "slug": "s", "question": "Will X happen?",
+        "description": "Resolves YES if X happens by the deadline.",
+        "outcomes": '["Yes", "No"]', "outcomePrices": '["0.40", "0.60"]',
+        "clobTokenIds": '["1", "2"]', "endDate": "2026-10-19T12:00:00Z",
+        "volumeNum": 100000.0, "liquidityNum": 50000.0,
+        "bestBid": 0.39, "bestAsk": 0.41, "spread": 0.02,
+        "acceptingOrders": True, "closed": False,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_filter_keeps_a_healthy_market():
+    cfg = DiscoveryConfig()
+    kept = filter_markets([Market.from_gamma(base_row())], cfg, now=NOW)
+    assert len(kept) == 1
+
+
+@pytest.mark.parametrize("override,reason", [
+    ({"closed": True}, "closed"),
+    ({"acceptingOrders": False}, "not accepting orders"),
+    ({"liquidityNum": 10.0}, "illiquid"),
+    ({"volumeNum": 10.0}, "no volume"),
+    ({"outcomePrices": '["0.99", "0.01"]', "bestBid": 0.985, "bestAsk": 0.995}, "already settled"),
+    ({"spread": 0.40}, "spread too wide"),
+    ({"endDate": "2029-01-01T00:00:00Z"}, "resolves too far out"),
+    ({"endDate": "2026-09-18T00:00:00Z"}, "already past its end date"),
+    ({"description": ""}, "no rules text for Jev to read"),
+    ({"outcomes": '["Trump", "Biden"]'}, "not a Yes/No market"),
+    ({"question": "Lakers vs. Celtics"}, "sports"),
+    ({"question": "What price will BTC hit above $200,000?"}, "resolves off a price feed"),
+])
+def test_filter_drops_untradeable_markets(override, reason):
+    cfg = DiscoveryConfig()
+    kept = filter_markets([Market.from_gamma(base_row(**override))], cfg, now=NOW)
+    assert kept == [], "should have dropped: {0}".format(reason)
+
+
+def test_include_slugs_bypasses_every_filter():
+    # Pinning a market by slug is an explicit instruction, so it overrides the
+    # heuristics rather than being silently dropped by them.
+    cfg = DiscoveryConfig(include_slugs=["s"])
+    row = base_row(liquidityNum=0.0, volumeNum=0.0, closed=True)
+    kept = filter_markets([Market.from_gamma(row)], cfg, now=NOW)
+    assert len(kept) == 1
+
+
+def test_refresh_prices_overwrites_the_stale_book():
+    class FakeClob:
+        def prices(self, token_ids, side="BUY"):
+            return {"1": 0.55} if side == "BUY" else {"1": 0.53}
+
+    market = Market.from_gamma(base_row())
+    refresh_prices([market], FakeClob())
+    assert market.best_ask == pytest.approx(0.55)
+    assert market.best_bid == pytest.approx(0.53)
+    assert market.spread == pytest.approx(0.02)
+
+
+def test_refresh_prices_ignores_a_crossed_book():
+    class CrossedClob:
+        def prices(self, token_ids, side="BUY"):
+            return {"1": 0.40} if side == "BUY" else {"1": 0.60}
+
+    market = Market.from_gamma(base_row())
+    refresh_prices([market], CrossedClob())
+    assert market.best_ask == pytest.approx(0.41)   # unchanged
+    assert market.best_bid == pytest.approx(0.39)

@@ -1,0 +1,71 @@
+# Copy to config.yaml and edit. `python run.py --demo` ignores this file and
+# uses built-in defaults, so the walkthrough always runs.
+#
+# The API key does NOT belong here. Put it in .env or the environment:
+#   TYPESAFE_API_KEY=sk-...
+
+typesafe:
+  model: jev-latest           # or a pinned version, e.g. jev-1.13.0
+  timeout: 30.0
+  max_retries: 3
+  price_per_billion_tokens: 42.0   # Jev bills input tokens only
+  budget_usd_per_run: 0.50    # hard stop; the scan aborts rather than overspend
+
+discovery:
+  max_markets: 40             # how many markets one scan will judge
+  fetch_limit: 250            # Gamma rows pulled before filtering
+  min_liquidity: 5000.0
+  min_volume: 20000.0
+  price_band_low: 0.05        # outside this band there is no room left to be
+  price_band_high: 0.95       # wrong about, so the trade cannot pay for itself
+  max_days_to_resolution: 120.0
+  min_days_to_resolution: 0.0
+  max_spread: 0.10
+  tag_ids: []                 # e.g. [2] for politics; empty = all categories
+  include_slugs: []           # pin specific markets; skips every filter above
+  exclude_keywords:           # markets that resolve off a scoreboard or a price
+    - "vs."                   # feed, where reading the news buys you nothing
+    - " vs "
+    - "will win the game"
+    - "point spread"
+    - "what price will"
+    - "above $"
+    - "below $"
+
+evidence:
+  provider: google_news       # google_news | rss | file | none
+  max_headlines: 12           # candidates per market sent to the screen
+  max_deep_reads: 3           # how many survive into the expensive stage
+  lookback_hours: 168.0
+  screen_threshold: 0.55
+  snippet_chars: 1200
+  rules_chars: 4000           # truncate resolution text; guards context rot
+  rss_feeds: []               # used when provider is "rss"; publisher feeds
+                              # carry real summaries, unlike Google News
+  evidence_file: ""           # used when provider is "file"
+
+judgment:
+  decisive_threshold: 0.80    # below this we take no view, which is most markets
+  contradiction_threshold: 0.35
+  weight_ambiguity: 0.45      # haircut weights; they are normalised, so only
+  weight_authority: 0.35      # their ratio matters
+  weight_directness: 0.20
+  max_haircut: 0.30           # most a judgment can be shrunk toward 0.50
+  low_confidence_floor: 0.50
+  avoid_ambiguity_norm: 0.75  # above this the rules are a dispute waiting to happen
+  stale_evidence_hours: 72.0  # older evidence downgrades TRADE to WATCH
+
+sizing:
+  bankroll: 1000.0
+  kelly_fraction: 0.25        # quarter Kelly
+  per_trade_cap_pct: 0.05
+  min_edge: 0.05              # must cover spread, slippage and model error
+  slippage: 0.01
+  fee_rate: 0.0               # Polymarket charges no maker/taker fee today
+  max_signals: 10
+
+output:
+  jsonl_path: data/judgments.jsonl
+  markdown_path: data/report.md
+  top_n: 15
+  show_no_view: false

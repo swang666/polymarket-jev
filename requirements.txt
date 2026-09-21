@@ -1,0 +1,7 @@
+# Runs on Python 3.9+. Only two hard dependencies.
+requests>=2.31      # Gamma / CLOB / TypeSafe HTTP calls, news RSS
+PyYAML>=6.0         # config.yaml loading (JSON config also accepted)
+
+# Optional:
+#   pytest>=7.0     # to run the test suite
+#   typesafe-sdk    # NOT required - pmjev/typesafe.py speaks the HTTP API directly

@@ -1,0 +1,14 @@
+# Normalise line endings so the repo is identical on Windows, macOS and Linux.
+* text=auto eol=lf
+
+# The judgment log is append-only and is written on whichever device ran the
+# scan. A plain merge would conflict on the last line every time two devices
+# both scanned; "union" keeps both sides' lines instead.
+#
+# Order within the file does not matter: backtest.py keys on market id and
+# keeps the earliest view of each market, so duplicated or interleaved runs
+# are deduplicated at read time rather than needing a clean merge here.
+data/*.jsonl merge=union
+
+# Recorded fixtures are data, not code -- keep diffs out of code review noise.
+pmjev/fixtures/*.json linguist-generated=true

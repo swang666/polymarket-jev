@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets and machine-local settings.
+.env
+config.yaml
+
+# Regenerated on every run -- no reason to sync it.
+data/report.md
+
+# NOTE: data/judgments.jsonl is deliberately NOT ignored. It is the accumulated
+# evidence that the strategy does or does not work, and it has to follow you
+# between devices or the backtest sample fragments. .gitattributes merges it
+# with the "union" driver so two devices appending never conflict.

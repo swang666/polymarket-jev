@@ -1,0 +1,345 @@
+{
+ "screen:1130012": {
+  "answers": {
+   "h0": {
+    "type": "noul",
+    "noul": 0.96
+   },
+   "h1": {
+    "type": "noul",
+    "noul": 0.88
+   },
+   "h2": {
+    "type": "noul",
+    "noul": 0.31
+   }
+  }
+ },
+ "deep:1130012:57b040ba09": {
+  "answers": {
+   "condition_met": {
+    "type": "noul",
+    "noul": 0.94
+   },
+   "condition_precluded": {
+    "type": "noul",
+    "noul": 0.02
+   },
+   "stance": {
+    "type": "choice",
+    "choice": "supports_yes",
+    "probabilities": {
+     "supports_yes": 0.9,
+     "supports_no": 0.033333333333333326,
+     "mixed": 0.033333333333333326,
+     "not_relevant": 0.033333333333333326
+    },
+    "confidence": 0.9
+   },
+   "directness": {
+    "type": "score",
+    "score": 2.9,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.93
+   },
+   "rule_ambiguity": {
+    "type": "score",
+    "score": 0.25,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.88
+   },
+   "source_authority": {
+    "type": "score",
+    "score": 2.8,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.85
+   }
+  }
+ },
+ "deep:1130012:3264f7c9b4": {
+  "answers": {
+   "condition_met": {
+    "type": "noul",
+    "noul": 0.71
+   },
+   "condition_precluded": {
+    "type": "noul",
+    "noul": 0.05
+   },
+   "stance": {
+    "type": "choice",
+    "choice": "supports_yes",
+    "probabilities": {
+     "supports_yes": 0.74,
+     "supports_no": 0.08666666666666667,
+     "mixed": 0.08666666666666667,
+     "not_relevant": 0.08666666666666667
+    },
+    "confidence": 0.74
+   },
+   "directness": {
+    "type": "score",
+    "score": 2.1,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.7
+   },
+   "rule_ambiguity": {
+    "type": "score",
+    "score": 0.6,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.72
+   },
+   "source_authority": {
+    "type": "score",
+    "score": 2.6,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.8
+   }
+  }
+ },
+ "screen:1163699": {
+  "answers": {
+   "h0": {
+    "type": "noul",
+    "noul": 0.91
+   },
+   "h1": {
+    "type": "noul",
+    "noul": 0.44
+   }
+  }
+ },
+ "deep:1163699:2f57464c39": {
+  "answers": {
+   "condition_met": {
+    "type": "noul",
+    "noul": 0.04
+   },
+   "condition_precluded": {
+    "type": "noul",
+    "noul": 0.84
+   },
+   "stance": {
+    "type": "choice",
+    "choice": "supports_no",
+    "probabilities": {
+     "supports_yes": 0.04,
+     "supports_no": 0.88,
+     "mixed": 0.04,
+     "not_relevant": 0.04
+    },
+    "confidence": 0.88
+   },
+   "directness": {
+    "type": "score",
+    "score": 2.4,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.82
+   },
+   "rule_ambiguity": {
+    "type": "score",
+    "score": 1.2,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.76
+   },
+   "source_authority": {
+    "type": "score",
+    "score": 2.5,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.86
+   }
+  }
+ },
+ "screen:663583": {
+  "answers": {
+   "h0": {
+    "type": "noul",
+    "noul": 0.93
+   }
+  }
+ },
+ "deep:663583:be94a6a6fc": {
+  "answers": {
+   "condition_met": {
+    "type": "noul",
+    "noul": 0.81
+   },
+   "condition_precluded": {
+    "type": "noul",
+    "noul": 0.06
+   },
+   "stance": {
+    "type": "choice",
+    "choice": "supports_yes",
+    "probabilities": {
+     "supports_yes": 0.69,
+     "supports_no": 0.10333333333333335,
+     "mixed": 0.10333333333333335,
+     "not_relevant": 0.10333333333333335
+    },
+    "confidence": 0.69
+   },
+   "directness": {
+    "type": "score",
+    "score": 2.2,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.71
+   },
+   "rule_ambiguity": {
+    "type": "score",
+    "score": 2.6,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.64
+   },
+   "source_authority": {
+    "type": "score",
+    "score": 1.7,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.58
+   }
+  }
+ },
+ "screen:561229": {
+  "answers": {
+   "h0": {
+    "type": "noul",
+    "noul": 0.62
+   },
+   "h1": {
+    "type": "noul",
+    "noul": 0.24
+   }
+  }
+ },
+ "deep:561229:45f4e3e214": {
+  "answers": {
+   "condition_met": {
+    "type": "noul",
+    "noul": 0.03
+   },
+   "condition_precluded": {
+    "type": "noul",
+    "noul": 0.02
+   },
+   "stance": {
+    "type": "choice",
+    "choice": "supports_yes",
+    "probabilities": {
+     "supports_yes": 0.51,
+     "supports_no": 0.16333333333333333,
+     "mixed": 0.16333333333333333,
+     "not_relevant": 0.16333333333333333
+    },
+    "confidence": 0.51
+   },
+   "directness": {
+    "type": "score",
+    "score": 0.9,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.8
+   },
+   "rule_ambiguity": {
+    "type": "score",
+    "score": 0.3,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.85
+   },
+   "source_authority": {
+    "type": "score",
+    "score": 2.2,
+    "legend": {
+     "0": "level 0",
+     "1": "level 1",
+     "2": "level 2",
+     "3": "level 3"
+    },
+    "probabilities": {},
+    "confidence": 0.83
+   }
+  }
+ }
+}
