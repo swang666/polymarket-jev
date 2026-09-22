@@ -59,7 +59,37 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _make_stdout_unicode_safe() -> None:
+    """Stop a market name from killing a run that has already been paid for.
+
+    Windows consoles still default to a legacy codepage, and Polymarket
+    questions routinely carry accents and dashes ("Mbappe" with an acute,
+    em-dashes in rules text). Printing one of those raises UnicodeEncodeError
+    *after* every Jev request has been billed, which is the worst possible
+    moment to lose the report.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass    # older Python, or a stream that cannot be reconfigured
+
+
+def emit(text: str) -> None:
+    """Print, and if the terminal cannot encode it, degrade instead of dying.
+
+    `_make_stdout_unicode_safe` handles this on any stream that supports
+    reconfigure. This is the backstop for the ones that do not.
+    """
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(text.encode(encoding, errors="replace").decode(encoding))
+
+
 def main(argv: Optional[List[str]] = None) -> int:
+    _make_stdout_unicode_safe()
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
@@ -92,7 +122,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 def _demo(cfg, args) -> int:
     signals, stats = run_demo(cfg)
-    print(_render(signals, stats, cfg, args))
+    emit(_render(signals, stats, cfg, args))
     if args.json:
         # --json is for piping; anything else on stdout would break the parse.
         return 0
@@ -125,11 +155,11 @@ def _dry_run(cfg, args) -> int:
     print()
     for preview in previews[:10]:
         print("-" * 90)
-        print(" {0}".format(preview["market"]))
+        emit(" {0}".format(preview["market"]))
         print("   {0} headlines, ~{1:,} tokens".format(
             len(preview["headlines"]), preview["approx_input_tokens"]))
         for title in preview["headlines"][:5]:
-            print("     - {0}".format(title[:84]))
+            emit("     - {0}".format(title[:84]))
     print("-" * 90)
     print(" Re-run with --json to read the exact state and questions.")
     return 0
@@ -172,7 +202,7 @@ def _scan(cfg, args) -> int:
                           now=now, run_id=run_id)
     stats.markets_fetched = len(markets)
 
-    print(_render(signals, stats, cfg, args))
+    emit(_render(signals, stats, cfg, args))
 
     md_path = cfg.path(cfg.output.markdown_path)
     write_markdown(md_path, markdown_report(
@@ -209,7 +239,7 @@ def _backtest(cfg, args) -> int:
             "calibration": report.calibration(),
         }, indent=2))
         return 0
-    print(report.render())
+    emit(report.render())
     return 0
 
 

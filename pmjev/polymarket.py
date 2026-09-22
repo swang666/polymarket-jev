@@ -42,7 +42,7 @@ class GammaClient:
                      closed: bool = False) -> List[Market]:
         """One page of open markets, richest first by default."""
         params: Dict[str, Any] = {
-            "limit": min(limit, 500),
+            "limit": min(limit, PAGE_SIZE),
             "offset": offset,
             "order": order,
             "ascending": str(ascending).lower(),
@@ -208,6 +208,34 @@ def filter_markets(markets: Sequence[Market], cfg: DiscoveryConfig,
     return kept
 
 
+# Gamma silently truncates a page to 100 rows whatever `limit` asks for. Ask
+# for 500 and you get 100, with nothing in the response saying so -- which is
+# why the stop condition below keys on an *empty* page rather than a short one.
+PAGE_SIZE = 100
+
+
+def fetch_pages(gamma: GammaClient, fetch_limit: int,
+                tag_id: Optional[int] = None) -> List[Market]:
+    """Page through Gamma until `fetch_limit` rows or the listing runs out.
+
+    Pagination is not optional here. Rows come back volume-descending, and the
+    top of that ordering is almost entirely sports and crypto-price markets --
+    exactly the ones this strategy excludes. The first 100 rows yield 3
+    eligible markets; the first 1000 yield 56.
+    """
+    out: List[Market] = []
+    offset = 0
+    while len(out) < fetch_limit:
+        page = gamma.list_markets(
+            limit=min(PAGE_SIZE, fetch_limit - len(out)),
+            offset=offset, tag_id=tag_id)
+        if not page:
+            break
+        out.extend(page)
+        offset += len(page)
+    return out[:fetch_limit]
+
+
 def discover(cfg: DiscoveryConfig, gamma: Optional[GammaClient] = None,
              clob: Optional[ClobClient] = None,
              now: Optional[datetime] = None) -> List[Market]:
@@ -216,7 +244,7 @@ def discover(cfg: DiscoveryConfig, gamma: Optional[GammaClient] = None,
     raw: List[Market] = []
     tag_ids: List[Optional[int]] = [t for t in cfg.tag_ids] or [None]
     for tag_id in tag_ids:
-        raw.extend(gamma.list_markets(limit=cfg.fetch_limit, tag_id=tag_id))
+        raw.extend(fetch_pages(gamma, cfg.fetch_limit, tag_id=tag_id))
 
     seen = set()
     unique: List[Market] = []

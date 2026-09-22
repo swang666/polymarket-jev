@@ -31,7 +31,10 @@ class DiscoveryConfig:
     """Which markets are even worth looking at."""
 
     max_markets: int = 40
-    fetch_limit: int = 250          # how many Gamma rows to pull before filtering
+    # Gamma returns rows volume-descending, and the top of that list is almost
+    # all sports and crypto-price markets. It takes about a thousand rows to
+    # reach a useful number of news-resolved ones.
+    fetch_limit: int = 1000         # how many Gamma rows to pull before filtering
     min_liquidity: float = 5000.0
     min_volume: float = 20000.0
     # A resolution-lag trade needs a market that is still genuinely uncertain.

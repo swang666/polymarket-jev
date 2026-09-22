@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pmjev.config import DiscoveryConfig
 from pmjev.models import Market
-from pmjev.polymarket import filter_markets, refresh_prices
+from pmjev.polymarket import fetch_pages, filter_markets, refresh_prices
 
 FIXTURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "pmjev", "fixtures")
@@ -158,3 +158,62 @@ def test_refresh_prices_ignores_a_crossed_book():
     refresh_prices([market], CrossedClob())
     assert market.best_ask == pytest.approx(0.41)   # unchanged
     assert market.best_bid == pytest.approx(0.39)
+
+
+def test_discover_pages_past_the_first_batch():
+    """Regression: a single 250-row page yielded 3 eligible markets, 1000 yielded 56.
+
+    Gamma returns rows volume-descending and the top of that ordering is
+    almost entirely sports and crypto-price markets, which this strategy
+    excludes. Without pagination the scanner starves.
+    """
+    from pmjev.polymarket import PAGE_SIZE, fetch_pages
+
+    class PagedGamma:
+        def __init__(self):
+            self.calls = []
+
+        def list_markets(self, limit=250, offset=0, **kwargs):
+            self.calls.append((limit, offset))
+            if offset >= 1000:
+                return []
+            return [Market.from_gamma({"id": str(offset + i), "slug": "s{0}".format(offset + i)})
+                    for i in range(min(limit, PAGE_SIZE))]
+
+    gamma = PagedGamma()
+    markets = fetch_pages(gamma, fetch_limit=1000)
+    assert len(markets) == 1000
+    assert len({m.id for m in markets}) == 1000, "offsets must not overlap"
+    assert gamma.calls[0] == (PAGE_SIZE, 0)
+    assert gamma.calls[1] == (PAGE_SIZE, PAGE_SIZE)
+    assert len(gamma.calls) == 10
+
+
+def test_a_short_page_does_not_end_pagination():
+    """Gamma caps a page at 100 rows however many you ask for, and says nothing.
+
+    Treating a short page as "listing exhausted" is what limited the scanner
+    to its first 100 rows, so a short page must keep paging.
+    """
+    class CappingGamma:
+        """Honours offset but silently truncates every page to 100 rows."""
+
+        def __init__(self, total):
+            self.total = total
+
+        def list_markets(self, limit=250, offset=0, **kwargs):
+            end = min(offset + 100, self.total)
+            return [Market.from_gamma({"id": str(i), "slug": "s{0}".format(i)})
+                    for i in range(offset, end)]
+
+    markets = fetch_pages(CappingGamma(total=430), fetch_limit=1000)
+    assert len(markets) == 430
+    assert len({m.id for m in markets}) == 430
+
+
+def test_fetch_pages_stops_when_the_listing_runs_out():
+    class EmptyGamma:
+        def list_markets(self, limit=250, offset=0, **kwargs):
+            return []
+
+    assert fetch_pages(EmptyGamma(), fetch_limit=1000) == []
