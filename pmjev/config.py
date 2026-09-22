@@ -149,6 +149,25 @@ class SizingConfig:
 
 
 @dataclass
+class ExecutionConfig:
+    """Portfolio-level caps. Per-trade sizing lives in SizingConfig.
+
+    These exist because a scheduled scanner can open twenty correlated
+    positions in one morning, each individually inside its own cap.
+    """
+
+    enabled: bool = False              # --execute must also be passed
+    positions_path: str = "data/positions.jsonl"
+    max_open_positions: int = 8
+    max_total_exposure_pct: float = 0.30
+    daily_loss_cap_pct: float = 0.10
+    allow_modes: List[str] = field(
+        # Forecast mode is off by default: its signals failed the coherence
+        # check the book passed. Add it here once the backtest earns it.
+        default_factory=lambda: ["resolution_lag"])
+
+
+@dataclass
 class OutputConfig:
     jsonl_path: str = "data/judgments.jsonl"
     markdown_path: str = "data/report.md"
@@ -164,6 +183,7 @@ class Config:
     judgment: JudgmentConfig = field(default_factory=JudgmentConfig)
     forecast: ForecastConfig = field(default_factory=ForecastConfig)
     sizing: SizingConfig = field(default_factory=SizingConfig)
+    execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     root: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent)
 

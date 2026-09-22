@@ -46,6 +46,15 @@ def build_parser() -> argparse.ArgumentParser:
                       help="build the requests and price them, but call nothing")
     mode.add_argument("--backtest", action="store_true",
                       help="score logged judgments against realised resolutions")
+    mode.add_argument("--positions", action="store_true",
+                      help="show the position book and settle anything resolved")
+
+    parser.add_argument("--execute", action="store_true",
+                        help="turn TRADE signals into paper positions at real "
+                             "book prices (no money moves)")
+    parser.add_argument("--live", action="store_true",
+                        help="place real orders -- refused until the backtest "
+                             "shows an edge; see pmjev/live.py")
 
     parser.add_argument("--forecast", action="store_true",
                         help="ask how the market will RESOLVE instead of whether "
@@ -115,6 +124,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.show_all:
         cfg.output.show_no_view = True
 
+    if args.live and not args.positions:
+        # Refuse before any spending, exactly as the missing-key check does.
+        from pmjev.live import LiveBroker, LiveExecutionNotEnabled
+        try:
+            LiveBroker(cfg.path(cfg.execution.positions_path),
+                       cfg.sizing.bankroll).execute([])
+        except LiveExecutionNotEnabled as exc:
+            print("LIVE EXECUTION REFUSED", file=sys.stderr)
+            print("-" * 70, file=sys.stderr)
+            print(str(exc), file=sys.stderr)
+            return 3
+
+    if args.positions:
+        return _positions(cfg, args)
     if args.backtest:
         return _backtest(cfg, args)
     if args.dry_run:
@@ -210,6 +233,11 @@ def _scan(cfg, args) -> int:
 
     emit(_render(signals, stats, cfg, args))
 
+    if args.execute:
+        rc = _execute(cfg, args, signals, run_id, gamma)
+        if rc:
+            return rc
+
     md_path = cfg.path(cfg.output.markdown_path)
     write_markdown(md_path, markdown_report(
         signals, stats, cfg.typesafe.price_per_billion_tokens, cfg.output.top_n))
@@ -246,6 +274,120 @@ def _backtest(cfg, args) -> int:
         }, indent=2))
         return 0
     emit(report.render())
+    return 0
+
+
+def _build_broker(cfg, args):
+    from pmjev.broker import PaperBroker, limits_from_config
+    from pmjev.live import LiveBroker
+
+    limits = limits_from_config(cfg.sizing, {
+        "max_open_positions": cfg.execution.max_open_positions,
+        "max_total_exposure_pct": cfg.execution.max_total_exposure_pct,
+        "daily_loss_cap_pct": cfg.execution.daily_loss_cap_pct,
+        "allow_modes": tuple(cfg.execution.allow_modes),
+    })
+    broker_cls = LiveBroker if getattr(args, "live", False) else PaperBroker
+    return broker_cls(cfg.path(cfg.execution.positions_path),
+                      cfg.sizing.bankroll, limits)
+
+
+def _execute(cfg, args, signals, run_id, gamma) -> int:
+    """Turn TRADE signals into positions. Paper unless --live (which refuses)."""
+    from pmjev.live import LiveExecutionNotEnabled
+
+    broker = _build_broker(cfg, args)
+    try:
+        opened, skipped = broker.execute(signals, run_id=run_id)
+    except LiveExecutionNotEnabled as exc:
+        print("", file=sys.stderr)
+        print("LIVE EXECUTION REFUSED", file=sys.stderr)
+        print("-" * 70, file=sys.stderr)
+        print(str(exc), file=sys.stderr)
+        return 3
+
+    print()
+    print("-" * 100)
+    print(" EXECUTION ({0}) -- no money moves on paper".format(broker.venue))
+    if not opened and not skipped:
+        print("   nothing to execute: no TRADE signals this run")
+    for position in opened:
+        emit("   OPENED  {0:<4} {1:>7} @ {2:.3f}  {3}".format(
+            position.side, "${0:,.0f}".format(position.stake),
+            position.entry_price, position.question[:52]))
+    for signal, reason in skipped:
+        emit("   skipped {0:<4} {1:<46} {2}".format(
+            signal.side, signal.market.question[:46], reason))
+
+    summary = broker.summary()
+    print("   book: {0} open, ${1:,.0f} at risk | settled {2}, "
+          "realised ${3:,.2f}".format(
+              summary["open"], summary["exposure"], summary["settled"],
+              summary["realised_pnl"]))
+    return 0
+
+
+def _positions(cfg, args) -> int:
+    """Show the book, settling anything whose market has resolved."""
+    broker = _build_broker(cfg, args)
+    gamma = GammaClient()
+
+    settled = broker.settle(gamma)
+    marks = broker.mark_to_market(gamma)
+    summary = broker.summary()
+
+    if args.json:
+        print(json.dumps({
+            "summary": summary,
+            "settled_now": [p.question for p in settled],
+            "unrealised": marks["unrealised"],
+            "open": [{"question": p.question, "side": p.side,
+                      "stake": p.stake, "entry": p.entry_price,
+                      "contracts": p.contracts, "mode": p.mode}
+                     for p in broker.open_positions()],
+        }, indent=2, default=str))
+        return 0
+
+    print("=" * 100)
+    print(" Position book ({0})".format(summary["venue"]))
+    print("=" * 100)
+
+    if settled:
+        print()
+        print(" Settled on this run:")
+        for position in settled:
+            emit("   {0}  {1:<4} stake ${2:,.0f} -> pnl ${3:+,.2f}  {4}".format(
+                "WON " if position.won else "LOST", position.side,
+                position.stake, position.pnl or 0.0, position.question[:46]))
+
+    open_positions = broker.open_positions()
+    if open_positions:
+        print()
+        print(" {0:<4} {1:>8} {2:>7} {3:>7} {4:>9}  {5}".format(
+            "SIDE", "STAKE", "ENTRY", "MARK", "UNREAL", "MARKET"))
+        print(" " + "-" * 98)
+        for position, price in marks["marks"]:
+            value = position.stake if price is None else position.mark(price)
+            emit(" {0:<4} {1:>8} {2:>7.3f} {3:>7} {4:>9}  {5}".format(
+                position.side, "${0:,.0f}".format(position.stake),
+                position.entry_price,
+                "-" if price is None else "{0:.3f}".format(
+                    price if position.side == "YES" else 1.0 - price),
+                "${0:+,.0f}".format(value - position.stake),
+                position.question[:50]))
+    else:
+        print()
+        print(" No open positions.")
+
+    print()
+    print(" open {0} | at risk ${1:,.0f} | unrealised ${2:+,.2f}".format(
+        summary["open"], summary["exposure"], marks["unrealised"]))
+    hit = summary["hit_rate"]
+    print(" settled {0} | hit rate {1} | realised ${2:+,.2f}".format(
+        summary["settled"],
+        "-" if hit is None else "{0:.0%}".format(hit),
+        summary["realised_pnl"]))
+    print("=" * 100)
     return 0
 
 

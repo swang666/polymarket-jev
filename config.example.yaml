@@ -75,6 +75,18 @@ sizing:
   fee_rate: 0.0               # Polymarket charges no maker/taker fee today
   max_signals: 10
 
+execution:
+  # Portfolio caps. Per-trade sizing lives in `sizing` above; these exist
+  # because a scheduled scanner can open twenty correlated positions in one
+  # morning, each individually inside its own cap.
+  enabled: false              # --execute must also be passed on the command line
+  positions_path: data/positions.jsonl
+  max_open_positions: 8
+  max_total_exposure_pct: 0.30   # across all open positions
+  daily_loss_cap_pct: 0.10       # realised losses today halt new entries
+  allow_modes:
+    - resolution_lag          # forecast mode is off until the backtest earns it
+
 output:
   jsonl_path: data/judgments.jsonl
   markdown_path: data/report.md
