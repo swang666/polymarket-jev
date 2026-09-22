@@ -1,0 +1,17 @@
+# Markets resolving within ~10 days. The fastest way to get resolved outcomes
+# into the backtest: scan now, score in a week instead of in four months.
+discovery:
+  max_markets: 12
+  max_days_to_resolution: 10.0
+  min_days_to_resolution: 0.5      # exclude anything already past its date
+  require_end_date: true           # the window IS the point of this scan
+  min_liquidity: 3000.0
+  min_volume: 10000.0
+
+evidence:
+  lookback_hours: 120.0            # short deadline, recent news is what matters
+
+output:
+  jsonl_path: data/judgments.jsonl
+  markdown_path: data/shortdated.md
+  show_no_view: true

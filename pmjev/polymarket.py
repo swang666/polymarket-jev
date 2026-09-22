@@ -196,9 +196,11 @@ def filter_markets(markets: Sequence[Market], cfg: DiscoveryConfig,
                 continue
 
             days = market.days_to_resolution(now)
-            if days is not None:
-                if days < cfg.min_days_to_resolution or days > cfg.max_days_to_resolution:
+            if days is None:
+                if cfg.require_end_date:
                     continue
+            elif days < cfg.min_days_to_resolution or days > cfg.max_days_to_resolution:
+                continue
             if not market.description.strip():
                 # No rules text means nothing for Jev to check the evidence against.
                 continue

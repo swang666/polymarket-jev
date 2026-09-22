@@ -227,3 +227,25 @@ def test_rss_summaries_have_entities_decoded():
     assert strip_html(raw) == 'The IRGC says the US "must accept the region\'s freedom"'
     assert strip_html("<b>a</b>   &amp;   <i>b</i>") == "a & b"
     assert strip_html("") == ""
+
+
+def test_markets_without_an_end_date_can_be_required_to_have_one():
+    """A "resolving within 10 days" scan must not return undated markets.
+
+    Gamma leaves endDate unset on some rows. They used to bypass the date
+    window entirely, so Senate races with no listed date turned up in a
+    short-dated scan alongside genuine 8-day markets.
+    """
+    undated = Market.from_gamma(base_row(endDate=None))
+
+    lenient = DiscoveryConfig(max_days_to_resolution=10.0)
+    assert len(filter_markets([undated], lenient, now=NOW)) == 1
+
+    strict = DiscoveryConfig(max_days_to_resolution=10.0, require_end_date=True)
+    assert filter_markets([undated], strict, now=NOW) == []
+
+
+def test_requiring_an_end_date_still_keeps_dated_markets_in_the_window():
+    strict = DiscoveryConfig(max_days_to_resolution=30.0, require_end_date=True)
+    inside = Market.from_gamma(base_row(endDate="2026-09-29T12:00:00Z"))
+    assert len(filter_markets([inside], strict, now=NOW)) == 1

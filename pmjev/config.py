@@ -43,6 +43,10 @@ class DiscoveryConfig:
     price_band_high: float = 0.95
     max_days_to_resolution: float = 120.0
     min_days_to_resolution: float = 0.0
+    # Gamma leaves endDate unset on some markets. They bypass the window above
+    # entirely, so a "resolving within 10 days" scan can return markets with no
+    # known date at all. Turn this on when the window is the point of the scan.
+    require_end_date: bool = False
     max_spread: float = 0.10
     tag_ids: List[int] = field(default_factory=list)
     include_slugs: List[str] = field(default_factory=list)
