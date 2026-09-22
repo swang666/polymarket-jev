@@ -12,6 +12,7 @@ for that, and a keyed news API drops in behind the same interface.
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -33,9 +34,15 @@ _WS_RE = re.compile(r"\s+")
 
 
 def strip_html(text: str) -> str:
+    """Tags out, entities decoded, whitespace collapsed.
+
+    Decoding matters: RSS summaries are full of &quot; and &#039;, and feeding
+    those raw into state makes Jev read punctuation as literal character
+    sequences in text it is being asked to judge word by word.
+    """
     if not text:
         return ""
-    return _WS_RE.sub(" ", _TAG_RE.sub(" ", text)).strip()
+    return _WS_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", text))).strip()
 
 
 def parse_rfc822(value: Optional[str]) -> Optional[datetime]:

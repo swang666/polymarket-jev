@@ -217,3 +217,13 @@ def test_fetch_pages_stops_when_the_listing_runs_out():
             return []
 
     assert fetch_pages(EmptyGamma(), fetch_limit=1000) == []
+
+
+def test_rss_summaries_have_entities_decoded():
+    """RSS descriptions arrive entity-encoded; Jev should not have to read &quot;."""
+    from pmjev.evidence import strip_html
+
+    raw = '<p>The IRGC says the US &quot;must accept the region&#039;s freedom&quot;</p>'
+    assert strip_html(raw) == 'The IRGC says the US "must accept the region\'s freedom"'
+    assert strip_html("<b>a</b>   &amp;   <i>b</i>") == "a & b"
+    assert strip_html("") == ""

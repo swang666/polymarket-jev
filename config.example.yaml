@@ -40,8 +40,19 @@ evidence:
   screen_threshold: 0.55
   snippet_chars: 1200
   rules_chars: 4000           # truncate resolution text; guards context rot
-  rss_feeds: []               # used when provider is "rss"; publisher feeds
-                              # carry real summaries, unlike Google News
+  # Used when provider is "rss". Publisher feeds carry real summary text,
+  # which Google News does not -- its article links are JS redirects, so that
+  # provider can only ever give you a headline. The trade-off is coverage: a
+  # live 40-market scan matched 12 candidates per market via google_news and
+  # 3 via these feeds. Verified working as of 2026-09; Reuters and AP have
+  # both retired their public RSS, so they are not listed.
+  rss_feeds: []
+  # rss_feeds:
+  #   - "https://www.aljazeera.com/xml/rss/all.xml"     # has summaries
+  #   - "https://feeds.npr.org/1001/rss.xml"            # has summaries
+  #   - "https://feeds.bbci.co.uk/news/world/rss.xml"
+  #   - "https://feeds.a.dj.com/rss/RSSWorldNews.xml"
+  #   - "https://feeds.bbci.co.uk/news/business/rss.xml"
   evidence_file: ""           # used when provider is "file"
 
 judgment:
