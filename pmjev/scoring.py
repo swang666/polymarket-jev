@@ -12,12 +12,14 @@ That is the only kind of claim this project trades on.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-from .config import JudgmentConfig, SizingConfig
+from .config import ForecastConfig, JudgmentConfig, SizingConfig
 from .models import (AMBIGUITY_LEVELS, AUTHORITY_LEVELS, DIRECTNESS_LEVELS,
-                     Judgment, Market, Signal, utcnow)
+                     SUFFICIENCY_LEVELS, TILT_LEVELS, Forecast, Judgment,
+                     Market, Signal, utcnow)
 
 # Gate values, ordered by how much they should draw your attention.
 TRADE = "TRADE"
@@ -279,3 +281,191 @@ def rank(signals: List[Signal]) -> List[Signal]:
         signals,
         key=lambda s: (GATE_ORDER.get(s.gate, 9), -(s.edge if s.edge is not None else -9)),
     )
+
+
+# ---------------------------------------------------------------------------
+# Forecast mode scoring.
+#
+# Same discipline as above: the model supplies judgments, this file supplies
+# every number. Three choices worth stating, because each one is a place where
+# a forecasting tool usually goes wrong:
+#
+# * Estimates are pooled in LOG-ODDS, not averaged directly. Averaging 0.95 and
+#   0.05 gives 0.50, which throws away that two strong opposite signals is a
+#   very different state from two weak ones.
+# * Uncertainty shrinks toward the BASE RATE, not toward 0.50. With no useful
+#   information the honest answer for "will the government be overthrown" is the
+#   base rate for that class of event, not a coin flip.
+# * Disagreeing with the price by a lot is treated as a WARNING. On a liquid
+#   market, a 50-point gap between you and the book usually means the book knows
+#   something you do not -- not that you found a 10x.
+# ---------------------------------------------------------------------------
+
+LOGIT_EPS = 1e-4
+# Evidence tilt is compressed into this probability band before pooling. Mapping
+# the bottom level straight to 0 would hand a single Score answer effectively
+# infinite log-odds weight.
+TILT_LOW, TILT_HIGH = 0.15, 0.85
+
+
+def logit(p: float) -> float:
+    p = clamp(p, LOGIT_EPS, 1.0 - LOGIT_EPS)
+    return math.log(p / (1.0 - p))
+
+
+def sigmoid(x: float) -> float:
+    if x >= 0:
+        return 1.0 / (1.0 + math.exp(-x))
+    exp_x = math.exp(x)          # avoid overflow for large negative x
+    return exp_x / (1.0 + exp_x)
+
+
+def time_remaining_phrase(days: Optional[float]) -> str:
+    """Describe the time left in words, because Jev cannot subtract dates.
+
+    The model is documented as treating dates as text rather than ordered
+    quantities, so it never sees two dates -- only this phrase.
+    """
+    if days is None:
+        return "no closing date is given"
+    if days < 0:
+        return "the closing date has already passed"
+    if days < 1:
+        return "less than a day left"
+    if days < 2:
+        return "about a day left"
+    if days < 14:
+        return "about {0} days left".format(int(round(days)))
+    if days < 60:
+        return "about {0} weeks left".format(int(round(days / 7.0)))
+    if days < 400:
+        return "about {0} months left".format(max(2, int(round(days / 30.0))))
+    return "more than a year left"
+
+
+def forecast_probability(forecast: "Forecast",
+                         cfg: ForecastConfig) -> Tuple[float, float, List[str]]:
+    """Pool the five judgments into P(Yes). Returns (p_yes, base_rate, reasons)."""
+    reasons: List[str] = []
+
+    base = cfg.base_rates.get(forecast.event_class)
+    if base is None:
+        base = 0.5
+        reasons.append("unrecognised event class {0!r}; base rate defaulted to 0.50".format(
+            forecast.event_class))
+    else:
+        reasons.append("class {0} (base rate {1:.2f})".format(forecast.event_class, base))
+
+    tilt_norm = normalise_score(forecast.evidence_tilt, TILT_LEVELS)
+    tilt_p = TILT_LOW + (TILT_HIGH - TILT_LOW) * tilt_norm
+
+    weights = (cfg.weight_direct, cfg.weight_base_rate, cfg.weight_tilt)
+    total = sum(weights)
+    if total <= 0:
+        return base, base, reasons + ["all forecast weights are zero"]
+
+    pooled = (
+        cfg.weight_direct * logit(forecast.resolves_yes)
+        + cfg.weight_base_rate * logit(base)
+        + cfg.weight_tilt * logit(tilt_p)
+    ) / total
+    p = sigmoid(pooled)
+    reasons.append("model {0:.2f}, tilt {1:.2f} -> pooled {2:.2f}".format(
+        forecast.resolves_yes, tilt_p, p))
+
+    # Thin or uninformative coverage pulls the answer back to the base rate.
+    sufficiency = normalise_score(forecast.evidence_sufficiency, SUFFICIENCY_LEVELS)
+    thinness = 1.0 - sufficiency
+    thinness = penalise_low_confidence(
+        thinness, forecast.evidence_sufficiency_confidence, cfg.low_confidence_floor)
+    unsure = penalise_low_confidence(
+        thinness, forecast.event_class_confidence, cfg.low_confidence_floor)
+
+    shrink_amount = clamp(unsure) * cfg.max_shrink
+    if shrink_amount > 0:
+        p = base + (p - base) * (1.0 - shrink_amount)
+        reasons.append("coverage thin; pulled {0:.0%} back toward the base rate".format(
+            shrink_amount))
+
+    return clamp(p), base, reasons
+
+
+def evaluate_forecast(market: Market, forecast: Optional["Forecast"],
+                      cfg: ForecastConfig, sizing_cfg: SizingConfig,
+                      now: Optional[datetime] = None) -> Signal:
+    """Score a forecast against the price and decide whether it is actionable."""
+    now = now or utcnow()
+
+    if forecast is None:
+        return Signal(market=market, judgment=None, side="NONE", p_model=None,
+                      market_price=None, edge=None, kelly_stake=None,
+                      dollars=None, gate=NO_VIEW,
+                      reasons=["no forecast produced"], scanned_at=now)
+
+    p_yes, base, reasons = forecast_probability(forecast, cfg)
+
+    ambiguity = normalise_score(forecast.rule_ambiguity, AMBIGUITY_LEVELS)
+    if ambiguity >= cfg.avoid_ambiguity_norm:
+        return Signal(market=market, judgment=None, side="NONE", p_model=p_yes,
+                      market_price=None, edge=None, kelly_stake=None,
+                      dollars=None, gate=AVOID,
+                      reasons=reasons + ["resolution rules read as genuinely disputable"],
+                      scanned_at=now)
+
+    if (forecast.evidence_sufficiency <= 0.5 or not forecast.headlines) \
+            and not cfg.allow_without_evidence:
+        return Signal(market=market, judgment=None, side="NONE", p_model=p_yes,
+                      market_price=None, edge=None, kelly_stake=None,
+                      dollars=None, gate=NO_VIEW,
+                      reasons=reasons + [
+                          "no informative coverage; this would be a bare prior, "
+                          "which the price already beats"],
+                      scanned_at=now)
+
+    # Price both sides and take whichever the forecast actually favours.
+    yes_cost = effective_cost(market, "YES", sizing_cfg)
+    no_cost = effective_cost(market, "NO", sizing_cfg)
+    candidates = []
+    if yes_cost is not None:
+        candidates.append(("YES", p_yes, yes_cost))
+    if no_cost is not None:
+        candidates.append(("NO", 1.0 - p_yes, no_cost))
+    if not candidates:
+        return Signal(market=market, judgment=None, side="NONE", p_model=p_yes,
+                      market_price=None, edge=None, kelly_stake=None,
+                      dollars=None, gate=WATCH,
+                      reasons=reasons + ["no usable book price"], scanned_at=now)
+
+    side, p_win, cost = max(candidates, key=lambda c: c[1] - c[2])
+    signal_edge = edge(p_win, cost)
+    fraction, dollars = size_position(p_win, cost, sizing_cfg)
+
+    market_yes = market.yes_price
+    if market_yes is not None:
+        gap = abs(p_yes - market_yes)
+        reasons.append("model {0:.2f} vs market {1:.2f} (gap {2:.2f})".format(
+            p_yes, market_yes, gap))
+        if gap > cfg.max_disagreement:
+            return Signal(market=market, judgment=None, side=side, p_model=p_yes,
+                          market_price=cost, edge=signal_edge, kelly_stake=None,
+                          dollars=None, gate=AVOID,
+                          reasons=reasons + [
+                              "disagreeing with the book by {0:.2f} is more likely "
+                              "to be a missing fact than an edge".format(gap)],
+                          scanned_at=now)
+
+    if signal_edge >= cfg.min_edge and fraction > 0:
+        gate = TRADE
+    else:
+        gate = WATCH
+        reasons.append("edge {0:+.3f} below the {1:.3f} forecast minimum".format(
+            signal_edge, cfg.min_edge))
+
+    days = market.days_to_resolution(now)
+    if days is not None and days < 0:
+        gate = AVOID
+        reasons.append("listed end date has passed")
+
+    return Signal(market=market, judgment=None, side=side, p_model=p_yes,
+                  market_price=cost, edge=signal_edge, kelly_stake=fraction,
+                  dollars=dollars, gate=gate, reasons=reasons, scanned_at=now)

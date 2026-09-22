@@ -67,8 +67,10 @@ def console_report(signals: Sequence[Signal], stats: RunStats,
             if signal.gate == NO_VIEW and not show_no_view:
                 continue
             lines.append("")
-            lines.append("[{0}] {1}".format(GATE_LABEL.get(signal.gate, signal.gate),
-                                            _truncate(signal.market.question, 88)))
+            lines.append("[{0}]{1} {2}".format(
+                GATE_LABEL.get(signal.gate, signal.gate),
+                " (forecast)" if signal.mode == "forecast" else "",
+                _truncate(signal.market.question, 76)))
             lines.append("    {0}".format(signal.market.url))
             if signal.judgment is not None:
                 headline = signal.judgment.headline
@@ -85,6 +87,17 @@ def console_report(signals: Sequence[Signal], stats: RunStats,
                         signal.judgment.directness,
                         signal.judgment.rule_ambiguity,
                         signal.judgment.source_authority))
+            if signal.forecast is not None:
+                f = signal.forecast
+                lines.append("    forecast : P(yes)={0:.2f} class={1} @{2:.2f}".format(
+                    f.resolves_yes, f.event_class or "?", f.event_class_confidence))
+                lines.append("    inputs   : tilt={0:.2f}/4 sufficiency={1:.2f}/3 "
+                             "ambig={2:.2f}/3 | {3}".format(
+                                 f.evidence_tilt, f.evidence_sufficiency,
+                                 f.rule_ambiguity, f.time_remaining))
+                lines.append("    based on : {0} headline(s), top: {1}".format(
+                    len(f.headlines),
+                    _truncate(f.headlines[0].title, 60) if f.headlines else "none"))
             for reason in signal.reasons:
                 lines.append("    why      : {0}".format(reason))
 

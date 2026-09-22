@@ -382,3 +382,220 @@ def deep_questions() -> Dict[str, Any]:
             },
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Forecast mode.
+#
+# This asks how a market will RESOLVE, not what a published fact already
+# settled. It is a harder question and a different bet on the model, so three
+# things keep it from degenerating into a bare prior:
+#
+# 1. The market price is never in state. If the model sees it, it anchors, and
+#    a forecast that echoes the price tells you nothing you did not already
+#    know -- while quietly breaking the backtest, which compares the two.
+# 2. The numeric base rate lives in code. The model classifies what KIND of
+#    event this is; config.forecast.base_rates supplies the number. "Things
+#    requiring an extraordinary departure rarely happen" is a base rate, not
+#    something a text model should be asked to recall as a figure.
+# 3. Dates stay out. Time remaining is computed in scoring.py and passed as a
+#    pre-computed phrase, because Jev treats dates as text, not quantities.
+# ---------------------------------------------------------------------------
+
+FORECAST_KEYS: List[str] = [
+    "resolves_yes",
+    "event_class",
+    "evidence_tilt",
+    "forecast_rule_ambiguity",
+    "evidence_sufficiency",
+]
+
+EVENT_CLASSES = [
+    "scheduled_routine",
+    "contested_competitive",
+    "requires_specific_action",
+    "requires_unusual_departure",
+    "requires_extraordinary_change",
+]
+
+TILT_LEVELS = 5
+SUFFICIENCY_LEVELS = 4
+
+
+def forecast_state(question: str, rules: str, headlines: Sequence[Headline],
+                   time_remaining: str, rules_chars: int = 4000,
+                   snippet_chars: int = 600, max_items: int = 6) -> Dict[str, Any]:
+    """State for a forecast. Deliberately carries no price and no raw dates.
+
+    `time_remaining` is a phrase computed in code ("about 3 weeks left"), never
+    a pair of dates for the model to subtract.
+    """
+    return {
+        "market_question": question,
+        "resolution_rules": rules[:rules_chars],
+        "time_remaining": time_remaining,
+        "recent_coverage": [
+            {
+                "headline": h.title,
+                "publisher": h.source or "unknown",
+                "summary": (h.snippet or h.title)[:snippet_chars],
+            }
+            for h in headlines[:max_items]
+        ],
+    }
+
+
+def forecast_questions() -> Dict[str, Any]:
+    """Five judgments that code combines into a probability."""
+    return {
+        "resolves_yes": {
+            "type": "noul",
+            "instructions": {
+                "inspect": "`market_question`, `resolution_rules`, `recent_coverage` and `time_remaining`",
+                "question": (
+                    "Taking everything in state together, is this market headed "
+                    "for a YES resolution under `resolution_rules`?"
+                ),
+                "focus": (
+                    "Weigh what `recent_coverage` reports against what "
+                    "`resolution_rules` literally requires, and against how much "
+                    "time `time_remaining` says is left. Judge the situation as "
+                    "described, not the topic in general."
+                ),
+            },
+            "criteria": {
+                "true": {
+                    "what": (
+                        "The situation described is on track to satisfy the rules: "
+                        "the required step is under way, committed to, or is the "
+                        "default outcome if nothing changes."
+                    ),
+                    "examples": [
+                        "The process the rules describe is in motion and on schedule.",
+                        "The actor the rules name has already committed to the act.",
+                    ],
+                },
+                "false": {
+                    "what": (
+                        "Satisfying the rules needs something not under way: a "
+                        "reversal, an unusual decision, or a step nobody has taken."
+                    ),
+                    "examples": [
+                        "The coverage describes obstruction or delay with no resolution.",
+                        "Nothing indicates the required step has begun.",
+                        "The rules need an outcome that runs against the current direction.",
+                    ],
+                },
+            },
+        },
+        "event_class": {
+            "type": "choice",
+            "instructions": {
+                "inspect": "`resolution_rules` and `market_question`",
+                "question": (
+                    "What KIND of event does a YES resolution require? Classify "
+                    "the requirement itself, not how likely you judge it to be."
+                ),
+            },
+            "criteria": {
+                "scheduled_routine": {
+                    "what": "Something already scheduled that happens unless it is cancelled.",
+                    "not_for": "A scheduled contest whose winner is in question.",
+                    "examples": ["Will the scheduled summit take place?",
+                                 "Will the report be published this quarter?"],
+                },
+                "contested_competitive": {
+                    "what": "A genuine contest between a small number of named alternatives.",
+                    "not_for": "A field so large that any one entrant is a long shot.",
+                    "examples": ["Will this candidate win the election?",
+                                 "Will this team win the tournament?"],
+                },
+                "requires_specific_action": {
+                    "what": "A named actor must choose to do something they have not committed to.",
+                    "not_for": "Actions already announced or under way.",
+                    "examples": ["Will the central bank cut rates?",
+                                 "Will the company announce an acquisition?"],
+                },
+                "requires_unusual_departure": {
+                    "what": "A clear break from the status quo that is possible but uncommon.",
+                    "not_for": "Routine political or corporate turnover.",
+                    "examples": ["Will the leader resign before the end of the term?",
+                                 "Will the treaty be abandoned?"],
+                },
+                "requires_extraordinary_change": {
+                    "what": "Something with little or no precedent in comparable situations.",
+                    "not_for": "Unlikely but previously observed outcomes.",
+                    "examples": ["Will the government be overthrown?",
+                                 "Will the alliance dissolve entirely?"],
+                },
+            },
+        },
+        "evidence_tilt": {
+            "type": "score",
+            "instructions": {
+                "inspect": "`recent_coverage` against `resolution_rules`",
+                "question": "Which way does the recent coverage lean for a YES resolution?",
+                "note": (
+                    "Rate the direction the reported facts point, not how "
+                    "confident or dramatic the writing is."
+                ),
+            },
+            "criteria": [
+                {"summary": "Points firmly against YES",
+                 "signals": ["Reports the opposite outcome, or the process abandoned"]},
+                {"summary": "Leans against YES",
+                 "signals": ["Setbacks, delays or opposition with no resolution"]},
+                {"summary": "Neutral, mixed, or says nothing either way",
+                 "signals": ["Background only", "Arguments reported on both sides"]},
+                {"summary": "Leans toward YES",
+                 "signals": ["Progress reported", "Supportive statements from those who decide"]},
+                {"summary": "Points firmly toward YES",
+                 "signals": ["The required step reported as under way or agreed"]},
+            ],
+        },
+        "forecast_rule_ambiguity": {
+            "type": "score",
+            "instructions": {
+                "inspect": "`resolution_rules`",
+                "question": (
+                    "How likely is it that two careful readers would disagree "
+                    "about what these rules require for a YES resolution?"
+                ),
+                "note": "Rate the rules as written, independently of the coverage.",
+            },
+            "criteria": [
+                {"summary": "The rules name an explicit trigger, source and deadline",
+                 "signals": ["Nothing is left to judgment"]},
+                {"summary": "Clear rules needing one small uncontroversial inference",
+                 "signals": ["Any reasonable reader would read them the same way"]},
+                {"summary": "A key term is left undefined",
+                 "signals": ["Relies on major, official or significant without defining them"]},
+                {"summary": "Silent, self-contradictory, or turning on a plainly contested term",
+                 "signals": ["Readers would reach opposite conclusions in obvious cases"]},
+            ],
+        },
+        "evidence_sufficiency": {
+            "type": "score",
+            "instructions": {
+                "inspect": "`recent_coverage` in relation to `market_question`",
+                "question": (
+                    "How much does the supplied coverage actually tell you about "
+                    "how this market resolves?"
+                ),
+                "note": (
+                    "Rate how informative what is here is. Coverage that is "
+                    "abundant but off-topic is still uninformative."
+                ),
+            },
+            "criteria": [
+                {"summary": "Nothing here bears on the question",
+                 "signals": ["Empty, or entirely about other subjects"]},
+                {"summary": "Same topic, but nothing about what the rules require",
+                 "signals": ["Commentary and background only"]},
+                {"summary": "Some reporting on the relevant process, incomplete",
+                 "signals": ["Partial accounts", "Second-hand or unconfirmed"]},
+                {"summary": "Direct, current reporting on exactly what the rules turn on",
+                 "signals": ["Named sources describing the deciding process"]},
+            ],
+        },
+    }

@@ -12,6 +12,8 @@ python run.py --demo        # offline walkthrough, no API key, no network
 python run.py --dry-run     # live markets + news, but nothing sent to Jev
 python run.py --scan        # the real thing (needs TYPESAFE_API_KEY)
 python run.py --backtest    # score logged judgments against what actually happened
+
+python run.py --scan --forecast   # ask "will this resolve YES?" instead (see below)
 ```
 
 ---
@@ -154,6 +156,7 @@ config.example.yaml     every threshold that decides whether money moves
 pmjev/
   questions.py          every word Jev is ever asked  <- the design surface
   scoring.py            all arithmetic, Kelly, gating (pure, no I/O)
+  coherence.py          cross-market checks for forecast mode
   judge.py              two-stage screen -> deep read cascade
   polymarket.py         Gamma + CLOB read-only clients
   evidence.py           Google News / publisher RSS / file providers
@@ -163,12 +166,111 @@ pmjev/
   report.py             console + Markdown output
   fixtures/             recorded markets + scripted answers for --demo
 tools/make_fixtures.py  regenerate the demo fixtures
-tests/                  109 tests, no network
+tests/                  145 tests, no network
 ```
 
 ```bash
 python -m pytest tests/ -q
 ```
+
+---
+
+## Forecast mode (`--forecast`)
+
+```bash
+python run.py --scan --forecast --limit 20
+```
+
+Instead of "has a published fact already settled this", forecast mode asks the
+direct question: **how is this market going to resolve, and do I have a good
+chance if I pick a side?**
+
+It is built to be measurable rather than argued about. Both modes write to the
+same log with their mode recorded, and `--backtest` scores them separately, each
+against the price on its own markets.
+
+Three design choices keep it from being a dressed-up prior:
+
+- **The price is never in state.** A forecast that has seen the price anchors to
+  it, tells you nothing new, and silently invalidates the backtest that compares
+  the two. There is a test asserting no price, odds or bid/ask string can reach
+  the model.
+- **The model classifies, code supplies the number.** It picks one of five event
+  classes (`scheduled_routine` through `requires_extraordinary_change`) and
+  `config.forecast.base_rates` turns that into a prior. "Unprecedented things
+  rarely happen" is a base rate, not something a text model should recall.
+- **Estimates pool in log-odds, and shrink toward the base rate.** Averaging
+  probabilities treats 0.95-and-0.05 like 0.51-and-0.49. And with no information
+  the honest answer for "will the government be overthrown" is the base rate, not
+  a coin flip.
+
+### What the first live forecast scan actually showed
+
+Run against 19 markets on 2026-09-22, it produced 5 `TRADE` signals where
+resolution-lag mode produced none. Then the numbers:
+
+| | model | market |
+|---|---|---|
+| spread (stdev) across 19 markets | **0.145** | 0.309 |
+| all 9 `contested_competitive` markets | **0.267 – 0.399** | 0.05 – 0.93 |
+
+The model's probabilities were less than half as spread out as the book's, and
+every market in the largest class landed within 0.13 of that class's 0.35 base
+rate. **The forecasts had collapsed onto their base rates.** Every apparent edge
+was the gap between 0.35 and whatever the market said — which is a mechanical
+bias toward betting against any price near 0 or 1, not a read on any situation.
+
+Then the coherence failure, which is worse:
+
+| market | model | book |
+|---|---|---|
+| Democratic Party control the House | 0.35 | 0.93 |
+| Republican Party control the House | 0.34 | 0.07 |
+| **sum** | **0.69** | **1.00** |
+
+Those two are mutually exclusive and exhaustive, in the same Polymarket event
+with `negRisk` set. The book sums to 1.00. The model lost 0.31 of probability
+mass between them. On the same run, the conjunction "R Senate **and** R House"
+scored 0.36 — higher than "R House" alone at 0.35, which cannot be true.
+
+None of this is a surprise given the model's own documentation: Jev's jaggedness
+page states plainly that logically related questions are not guaranteed to
+cohere, and that `P(noul) != 1 - P(not noul)`. Resolution-lag mode is barely
+exposed to that, because every question is about one article and one rule.
+Forecast mode is exposed to it constantly.
+
+### The guards this bought
+
+`pmjev/coherence.py` now runs on every forecast scan:
+
+- **Sibling coherence.** Markets sharing a `negRisk` event are alternative
+  answers to one question. If the model's probabilities across a group drift
+  more than `0.25` from the book's total for that same group, every signal in it
+  is downgraded to `AVOID`. On the live re-run this demoted the House pair and
+  the Brazilian election pair, taking 5 trades down to 3.
+- **Spread diagnostic.** When the model's stdev falls below 60% of the market's,
+  the scan reports base-rate collapse instead of letting it read as edge. The
+  live run came in at 47%.
+
+Both are honest about their limits. The sibling check compares *sums*, so it
+catches probability mass going missing but not mass being in the wrong place —
+"R Senate, R House" at 0.36 against a market of 0.08 survived it, because its
+group happened to total correctly. And nothing detects the conjunction error,
+because the API does not say which markets are nested inside others.
+
+### So which mode should you run?
+
+Run both, let them log, and read `--backtest`. That is what the mode comparison
+table is for.
+
+My read on the evidence so far, stated plainly so you can disagree with it: the
+resolution-lag mode refuses almost everything and has found nothing yet, which
+is frustrating but honest. Forecast mode produces signals, but the first run's
+signals were base-rate artifacts that failed an elementary coherence check the
+market passed. More output is not more edge. If you want forecast mode to earn
+its place, the thing to fix is the evidence layer — `evidence_sufficiency` was
+scoring 1.0–1.4 out of 3 on nearly every market, and a forecast built on thin
+coverage is exactly what collapses onto a prior.
 
 ---
 

@@ -93,6 +93,47 @@ class JudgmentConfig:
 
 
 @dataclass
+class ForecastConfig:
+    """Settings for forecast mode: "do I have a good chance if I pick this side?"
+
+    This mode asks the model to judge how a market will resolve, rather than
+    whether a published fact has already resolved it. That is a harder question
+    and one the price is already an aggregate answer to, so the defaults here
+    are deliberately more demanding than the resolution-lag ones.
+    """
+
+    # Combination weights, applied in log-odds space (the standard way to pool
+    # probability estimates -- it handles values near 0 and 1 without blowing up).
+    weight_direct: float = 0.55      # the model's own P(resolves yes)
+    weight_base_rate: float = 0.30   # the prior for the class of event it is
+    weight_tilt: float = 0.15        # which way the supplied evidence leans
+
+    # Priors per event class. The model classifies the event; code supplies the
+    # number, because "unprecedented things rarely happen" is a base rate, not
+    # something a text model should be asked to recall numerically.
+    base_rates: Dict[str, float] = field(default_factory=lambda: {
+        "scheduled_routine": 0.85,
+        "contested_competitive": 0.35,
+        "requires_specific_action": 0.20,
+        "requires_unusual_departure": 0.08,
+        "requires_extraordinary_change": 0.03,
+    })
+
+    # Forecasting is harder than fact-checking, so demand more before acting.
+    min_edge: float = 0.10
+    # Disagreeing with the price by more than this usually means the model has
+    # missed something the market knows, not that you found a 10x.
+    max_disagreement: float = 0.45
+    # Pull the blend toward the base rate when the model is unsure.
+    low_confidence_floor: float = 0.55
+    max_shrink: float = 0.35
+    avoid_ambiguity_norm: float = 0.75
+    # Without evidence this is a bare prior, which is the failure mode the
+    # README warns about. Off by default; turn on only to measure the difference.
+    allow_without_evidence: bool = False
+
+
+@dataclass
 class SizingConfig:
     bankroll: float = 1000.0
     kelly_fraction: float = 0.25    # quarter Kelly
@@ -117,6 +158,7 @@ class Config:
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     evidence: EvidenceConfig = field(default_factory=EvidenceConfig)
     judgment: JudgmentConfig = field(default_factory=JudgmentConfig)
+    forecast: ForecastConfig = field(default_factory=ForecastConfig)
     sizing: SizingConfig = field(default_factory=SizingConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     root: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent)

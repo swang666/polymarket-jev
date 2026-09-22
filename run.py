@@ -4,6 +4,7 @@
   python run.py --demo                 Offline walkthrough. No API key, no network.
   python run.py --dry-run              Real markets + news, but send nothing to Jev.
   python run.py --scan                 Live scan (needs TYPESAFE_API_KEY).
+  python run.py --scan --forecast      Ask "will this resolve YES?" instead.
   python run.py --scan --market SLUG   Scan one market by its Polymarket slug.
   python run.py --backtest             Score the logged judgments against outcomes.
 
@@ -46,6 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--backtest", action="store_true",
                       help="score logged judgments against realised resolutions")
 
+    parser.add_argument("--forecast", action="store_true",
+                        help="ask how the market will RESOLVE instead of whether "
+                             "a published fact already settled it (harder question; "
+                             "logged separately so --backtest can compare the two)")
     parser.add_argument("--config", default=None, help="path to config.yaml")
     parser.add_argument("--market", action="append", default=[],
                         help="restrict to this market slug (repeatable)")
@@ -198,8 +203,9 @@ def _scan(cfg, args) -> int:
     store = JsonlStore(cfg.path(cfg.output.jsonl_path))
     run_id = new_run_id()
 
+    mode = "forecast" if args.forecast else "resolution_lag"
     signals, stats = scan(cfg, client, provider, markets, store=store,
-                          now=now, run_id=run_id)
+                          now=now, run_id=run_id, mode=mode)
     stats.markets_fetched = len(markets)
 
     emit(_render(signals, stats, cfg, args))

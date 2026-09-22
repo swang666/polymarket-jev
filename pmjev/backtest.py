@@ -36,6 +36,7 @@ class Resolved:
     entry_cost: Optional[float]
     stake_dollars: Optional[float]
     outcome_yes: int          # 1 if the market resolved YES
+    mode: str = "resolution_lag"
 
     @property
     def side_won(self) -> bool:
@@ -91,6 +92,37 @@ class BacktestReport:
         """(bucket label, n, mean predicted, observed frequency)."""
         return _calibration([(r.p_model_yes, r.outcome_yes) for r in self.resolved], bins)
 
+    def by_mode(self, mode: str) -> "BacktestReport":
+        """A sub-report covering only one mode, for head-to-head comparison."""
+        return BacktestReport(resolved=[r for r in self.resolved if r.mode == mode])
+
+    def modes(self) -> List[str]:
+        return sorted({r.mode for r in self.resolved})
+
+    def render_comparison(self) -> List[str]:
+        """Score each mode against the price on the markets it actually saw.
+
+        This is the only thing that settles which approach is worth running.
+        Note the two modes are NOT necessarily scored on the same markets --
+        resolution-lag mode declines most of them by design -- so compare each
+        one against its own market benchmark, never against the other's.
+        """
+        modes = self.modes()
+        if len(modes) < 2:
+            return []
+        out = ["", " Mode comparison (each vs the price on ITS OWN markets)",
+               "   {0:<16} {1:>4} {2:>9} {3:>9} {4:>9}".format(
+                   "mode", "n", "model", "market", "gap")]
+        for mode in modes:
+            sub = self.by_mode(mode)
+            gap = sub.brier_gap()
+            out.append("   {0:<16} {1:>4} {2:>9.4f} {3:>9.4f} {4:>+9.4f}".format(
+                mode, len(sub.resolved), sub.brier_model() or 0.0,
+                sub.brier_market() or 0.0, gap or 0.0))
+        out.append("   Lower model Brier is better; a negative gap means that mode")
+        out.append("   beat the price. Sample sizes differ -- read n before the gap.")
+        return out
+
     def render(self) -> str:
         lines: List[str] = []
         lines.append("=" * 80)
@@ -135,6 +167,8 @@ class BacktestReport:
         for label, count, predicted, observed in self.calibration():
             lines.append("   {0:<12} {1:>4} {2:>10.3f} {3:>10.3f}".format(
                 label, count, predicted, observed))
+
+        lines.extend(self.render_comparison())
 
         lines.append("")
         lines.append(" A gap that is not clearly negative across at least a few dozen")
@@ -207,12 +241,15 @@ def run_backtest(store: JsonlStore, gamma: Optional[GammaClient] = None,
         market_id = str(market.get("id", ""))
         if not market_id:
             continue
-        # One row per market: the first time we took a view is the honest entry.
-        if market_id not in latest:
-            latest[market_id] = record
+        # One row per (market, mode): the first time we took a view is the
+        # honest entry, and the two modes must not overwrite each other.
+        key = "{0}:{1}".format(record.get("mode", "resolution_lag"), market_id)
+        if key not in latest:
+            latest[key] = record
 
     cache: Dict[str, Optional[Dict]] = {}
-    for market_id, record in latest.items():
+    for key, record in latest.items():
+        market_id = str((record.get("market") or {}).get("id", ""))
         if market_id not in cache:
             try:
                 fetched = gamma.get_market(market_id)
@@ -238,6 +275,7 @@ def run_backtest(store: JsonlStore, gamma: Optional[GammaClient] = None,
             continue
 
         report.resolved.append(Resolved(
+            mode=record.get("mode", "resolution_lag"),
             market_id=market_id,
             slug=market.get("slug", ""),
             question=market.get("question", ""),

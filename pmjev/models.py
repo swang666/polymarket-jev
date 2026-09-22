@@ -245,6 +245,56 @@ class Judgment:
         return cls(**{k: v for k, v in payload.items() if k in allowed})
 
 
+
+# Level counts for the forecast-mode Score questions in questions.py.
+TILT_LEVELS = 5
+SUFFICIENCY_LEVELS = 4
+
+
+@dataclass
+class Forecast:
+    """Forecast-mode answers for one market.
+
+    Unlike a Judgment, this is a view about how the market will RESOLVE rather
+    than about what a published article already settled. It is a genuinely
+    harder question and the price is already an aggregate answer to it, so
+    every one of these is logged with `mode: forecast` and scored separately in
+    the backtest. Nothing here has earned the right to be believed yet.
+    """
+
+    market_id: str
+    headlines: List[Headline]
+    resolves_yes: float                     # noul: headed for YES
+    event_class: str                        # choice: which base rate applies
+    event_class_probs: Dict[str, float]
+    event_class_confidence: float
+    evidence_tilt: float                    # score 0..4, 2 = neutral
+    evidence_tilt_confidence: float
+    rule_ambiguity: float                   # score 0..3
+    rule_ambiguity_confidence: float
+    evidence_sufficiency: float             # score 0..3
+    evidence_sufficiency_confidence: float
+    time_remaining: str = ""
+    input_tokens: int = 0
+    model: str = ""
+    forecast_at: datetime = field(default_factory=utcnow)
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = asdict(self)
+        out["headlines"] = [h.to_dict() for h in self.headlines]
+        out["forecast_at"] = self.forecast_at.isoformat()
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Forecast":
+        payload = dict(data)
+        payload["headlines"] = [Headline.from_dict(h)
+                                for h in payload.get("headlines") or []]
+        at = parse_iso(payload.pop("forecast_at", None))
+        payload["forecast_at"] = at or utcnow()
+        allowed = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
+        return cls(**{k: v for k, v in payload.items() if k in allowed})
+
 @dataclass
 class Signal:
     """A scored result for one market -- actionable or explicitly not."""
@@ -260,6 +310,10 @@ class Signal:
     gate: str                      # "TRADE" | "WATCH" | "AVOID" | "NO_VIEW"
     reasons: List[str] = field(default_factory=list)
     scanned_at: datetime = field(default_factory=utcnow)
+    # Forecast mode fills `forecast` instead of `judgment`. `mode` is written
+    # into every log row so the backtest can score the two approaches apart.
+    forecast: Optional[Forecast] = None
+    mode: str = "resolution_lag"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -276,7 +330,9 @@ class Signal:
                 "liquidity": self.market.liquidity_num,
                 "volume": self.market.volume_num,
             },
+            "mode": self.mode,
             "judgment": self.judgment.to_dict() if self.judgment else None,
+            "forecast": self.forecast.to_dict() if self.forecast else None,
             "side": self.side,
             "p_model": self.p_model,
             "market_price": self.market_price,

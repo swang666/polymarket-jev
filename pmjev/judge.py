@@ -13,9 +13,10 @@ import logging
 from typing import List, Optional, Protocol, Sequence, Tuple
 
 from .config import Config
-from .models import Headline, Judgment, Market, RunStats
-from .questions import (deep_questions, deep_state, screen_index,
-                        screen_questions, screen_state)
+from .models import Forecast, Headline, Judgment, Market, RunStats
+from .questions import (deep_questions, deep_state, forecast_questions,
+                        forecast_state, screen_index, screen_questions,
+                        screen_state)
 from .typesafe import Answers, TypeSafeError
 
 log = logging.getLogger(__name__)
@@ -147,3 +148,55 @@ def _headline_key(headline: Headline) -> str:
     """Stable short key for fixtures and logs."""
     import hashlib
     return hashlib.sha1(headline.title.encode("utf-8")).hexdigest()[:10]
+
+
+def forecast_market(client: SystemOne, market: Market,
+                    headlines: Sequence[Headline], cfg: Config,
+                    now=None, stats: Optional[RunStats] = None) -> Optional[Forecast]:
+    """Forecast how one market resolves. One request, five judgments.
+
+    No screen stage here: forecast mode wants breadth of context rather than a
+    single decisive article, so the top few headlines go in together. The
+    trade-off is real -- more context is exactly what the docs warn causes
+    accuracy to drift -- which is why `max_items` is small and each summary is
+    truncated hard.
+    """
+    from .scoring import time_remaining_phrase
+
+    phrase = time_remaining_phrase(market.days_to_resolution(now))
+    state = forecast_state(
+        market.question, market.description, headlines, phrase,
+        rules_chars=cfg.evidence.rules_chars)
+    questions = forecast_questions()
+
+    if hasattr(client, "next_tag"):
+        client.next_tag = "forecast:{0}".format(market.id)  # type: ignore[attr-defined]
+
+    answers = client.system_one(state, questions)
+    if stats is not None:
+        stats.requests_made += 1
+        stats.input_tokens += answers.input_tokens
+        stats.output_tokens += answers.output_tokens
+
+    missing = answers.missing(questions)
+    if missing:
+        log.warning("market %s: missing forecast answers %s", market.slug, missing)
+        return None
+
+    return Forecast(
+        market_id=market.id,
+        headlines=list(headlines[:6]),
+        resolves_yes=answers.noul("resolves_yes"),
+        event_class=answers.choice("event_class"),
+        event_class_probs=answers.choice_probs("event_class"),
+        event_class_confidence=answers.confidence("event_class"),
+        evidence_tilt=answers.score("evidence_tilt"),
+        evidence_tilt_confidence=answers.confidence("evidence_tilt"),
+        rule_ambiguity=answers.score("forecast_rule_ambiguity"),
+        rule_ambiguity_confidence=answers.confidence("forecast_rule_ambiguity"),
+        evidence_sufficiency=answers.score("evidence_sufficiency"),
+        evidence_sufficiency_confidence=answers.confidence("evidence_sufficiency"),
+        time_remaining=phrase,
+        input_tokens=answers.input_tokens,
+        model=answers.model,
+    )
